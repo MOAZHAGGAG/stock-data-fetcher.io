@@ -1,184 +1,235 @@
-# Updated Stock Prices Data Pipeline Documentation
+# Stock Prices Data Pipeline Documentation
 
-This document provides a detailed explanation of the **updated Stock Prices Data Pipeline**. The pipeline now fetches stock prices with **accurate timestamps** from **yfinance**, processes the data in **batches**, and stores it in an **Iceberg table** using **Trino**. The pipeline is scheduled to run every **5 minutes** during the **Egyptian Stock Market working hours** (10 AM to 2:59 PM, Sunday to Thursday).
+This document provides a detailed explanation of the **Stock Prices Data Pipeline** implemented using **Apache Airflow**, **Trino**, and **Iceberg**. The pipeline fetches stock prices for a list of companies, stores the data in an **Iceberg table**, and appends the data to a **CSV file** for backup.
 
 ---
 
 ## Table of Contents
 1. [Overview](#overview)
-2. [Key Updates](#key-updates)
-3. [Pipeline Workflow](#pipeline-workflow)
-4. [DAG Configuration](#dag-configuration)
-5. [Batch Processing](#batch-processing)
-6. [Time Zone Handling](#time-zone-handling)
-7. [Data Validation](#data-validation)
-8. [Error Handling and Retries](#error-handling-and-retries)
-9. [Conclusion](#conclusion)
+2. [Schema and Table Definitions](#schema-and-table-definitions)
+3. [DAG Implementation](#dag-implementation)
+4. [Pipeline Workflow](#pipeline-workflow)
+5. [Dependencies](#dependencies)
+6. [Logging and Error Handling](#logging-and-error-handling)
+7. [CSV Backup](#csv-backup)
+8. [Conclusion](#conclusion)
 
 ---
 
 ## Overview
 
-The updated pipeline now:
-1. Fetches stock prices with **accurate timestamps** from **yfinance**.
-2. Processes tickers in **batches** to improve reliability and reduce memory usage.
-3. Runs every **5 minutes** during the **Egyptian Stock Market working hours** (10 AM to 2:59 PM, Sunday to Thursday).
-4. Validates stock data before insertion.
-5. Handles errors and retries gracefully.
+The pipeline is designed to:
+1. Fetch stock prices for a predefined list of companies using the **yfinance** library.
+2. Store the fetched data in an **Iceberg table** using **Trino**.
+3. Append the fetched data to a **CSV file** for backup purposes.
+
+The pipeline is scheduled to run every **15 minutes** using **Apache Airflow**.
 
 ---
 
-## Key Updates
+## Schema and Table Definitions
 
-### 1. **Accurate Timestamps**
-   - The pipeline now fetches the **actual timestamp** associated with the stock price from **yfinance**.
-   - The timestamp is converted to **Egypt time (Africa/Cairo)** using the `pytz` library.
+### Schema
+The schema `iceberg.stock_db` is created to organize the tables for stock prices and company information.
 
-   ```python
-   egypt_tz = pytz.timezone('Africa/Cairo')
-   utc_time = datetime.fromtimestamp(quote_info['regularMarketTime'], pytz.UTC)
-   egypt_time = utc_time.astimezone(egypt_tz)
-   trade_date = egypt_time.strftime("%Y-%m-%d %H:%M:%S")
+```sql
+CREATE SCHEMA iceberg.stock_db;
+```
+
+### Tables
+1. **`stock_prices` Table**:
+   - Stores the stock prices with the following columns:
+     - `record_date`: Timestamp of the record.
+     - `ticker`: Stock ticker symbol.
+     - `price`: Stock price at the given timestamp.
+
+   ```sql
+   CREATE TABLE iceberg.stock_db.stock_prices (
+       record_date TIMESTAMP,
+       ticker VARCHAR,
+       price DECIMAL(10,2)
+   );
    ```
 
-### 2. **Batch Processing**
-   - Tickers are processed in **batches** to reduce memory usage and improve reliability.
-   - The batch size is configurable via the `BATCH_SIZE` environment variable (default: 12).
+2. **`company_info` Table**:
+   - Stores company information with the following columns:
+     - `company_code`: Unique code for the company.
+     - `company_name`: Name of the company.
+     - `ticker`: Stock ticker symbol.
 
-   ```python
-   def process_tickers_in_batches(tickers, batch_size=BATCH_SIZE):
-       for i in range(0, len(tickers), batch_size):
-           batch = tickers[i:i+batch_size]
-           values_list = process_ticker_batch(batch)
+   ```sql
+   CREATE TABLE IF NOT EXISTS iceberg.stock_db.company_info (
+       company_code VARCHAR,
+       company_name VARCHAR,
+       ticker VARCHAR
+   );
    ```
 
-### 3. **Scheduling**
-   - The DAG runs every **5 minutes** during the **Egyptian Stock Market working hours** (10 AM to 2:59 PM, Sunday to Thursday).
-   - The schedule is defined using a **cron expression**:
+### Sample Data for `company_info`
+The `company_info` table is pre-populated with sample data for 24 companies.
+
+```sql
+INSERT INTO iceberg.stock_db.company_info (company_code, company_name, ticker) VALUES
+    ('RMDA', 'Tenth Of Ramadan Pharmaceutical', 'EGS381B1C015'),
+    ('MPCI', 'Memphis Pharmaceuticals', 'EGS38351C010'),
+    ('RACC', 'Raya Contact Center', 'EGS74191C015'),
+    ('MFPC', 'Misr Fertilizers Production Co. (MOPCO)', 'EGS39061C014'),
+    ('ORWE', 'Oriental Weavers', 'EGS33041C012'),
+    ('TALM', 'Taaleem Management Services', 'EGS597R1C017'),
+    ('OLFI', 'Obour Land for Food Industries', 'EGS30AL1C012'),
+    ('CSAG', 'Canal Shipping Agencies', 'EGS44031C010'),
+    ('ORAS', 'Orascom Construction PLC', 'EGS95001C011'),
+    ('MASR', 'Madinet Nasr for Housing & Development', 'EGS65571C019'),
+    ('KZPC', 'Kafr El Zayat Pesticides', 'EGS38411C012'),
+    ('SWDY', 'Elsewedy Electric', 'EGS3G0Z1C014'),
+    ('ARCC', 'Arabian Cement Co.', 'EGS3C0O1C016'),
+    ('KABO', 'El Nasr Clothing & Textiles (KABO)', 'EGS33061C010'),
+    ('JUFO', 'Juhayna Food Industries', 'EGS30901C010'),
+    ('DSCW', 'Dice Sport & Casual Wear', 'EGS33321C018'),
+    ('ISPH', 'Ibnsina Pharma', 'EGS512O1C012'),
+    ('ETRS', 'Egyptian Transport (Egytrans)', 'EGS42051C010'),
+    ('SKPC', 'Sidi Kerir Petrochemicals', 'EGS380S1C017'),
+    ('EFID', 'Edita Food Industries', 'EGS305I1C011'),
+    ('EGAL', 'Egypt Aluminum', 'EGS3E181C010'),
+    ('ABUK', 'Abu Qir Fertilizers', 'EGS38191C010'),
+    ('POUL', 'Cairo Poultry', 'EGS02051C018'),
+    ('SAUD', 'MSCI EUROPE DIVERSIFIED GRTR US/ Baraka bank', 'EGS60101C010');
+```
+
+---
+
+## DAG Implementation
+
+The DAG (`stock_dag.py`) is implemented using **Apache Airflow**. It consists of a single task that fetches stock prices and stores them in the Iceberg table and a CSV file.
+
+### Key Components
+
+1. **DAG Definition**:
+   - The DAG is named `stock_prices_iceberg_v2`.
+   - It runs every **15 minutes** (`schedule_interval=timedelta(minutes=15)`).
+   - The start date is set to **October 1, 2023**.
 
    ```python
-   schedule_interval='*/5 8-12 * * 0-4'
+   dag = DAG(
+       'stock_prices_iceberg_v2',
+       default_args=default_args,
+       description='Fetch stock prices and store in Iceberg using Trino',
+       schedule_interval=timedelta(minutes=15),
+       catchup=False,
+   )
    ```
 
-   - Explanation:
-     - `*/5`: Every 5 minutes.
-     - `8-12`: From 10 AM to 2:59 PM (UTC+2).
-     - `0-4`: Sunday to Thursday.
-
-### 4. **Data Validation**
-   - Stock data is validated before insertion to ensure:
-     - The ticker is valid.
-     - The price is a positive number.
-     - The timestamp is valid.
+2. **Task Definition**:
+   - The task `fetch_stock_prices` is implemented using the `PythonOperator`.
+   - It calls the `fetch_stock_prices` function to fetch and store stock prices.
 
    ```python
-   def validate_stock_data(ticker, price, trade_date):
-       if not ticker or not isinstance(ticker, str):
-           return False, "Invalid ticker symbol"
-       if price is None or not isinstance(price, (int, float)) or price <= 0:
-           return False, f"Invalid price for {ticker}: {price}"
-       if not trade_date:
-           return False, f"Invalid trade date for {ticker}"
-       return True, None
+   fetch_prices_task = PythonOperator(
+       task_id='fetch_stock_prices',
+       python_callable=fetch_stock_prices,
+       dag=dag,
+   )
    ```
 
-### 5. **Error Handling and Retries**
-   - The pipeline retries failed API calls up to `MAX_RETRIES` times (default: 3).
-   - A delay (`RETRY_DELAY`) is added between retries (default: 10 seconds).
+3. **Fetching Tickers**:
+   - The `get_tickers_from_trino` function fetches the list of tickers from the `company_info` table in Iceberg.
 
    ```python
-   for attempt in range(max_retries):
-       try:
-           # Fetch data
-       except Exception as e:
-           logger.warning(f"Attempt {attempt+1}/{max_retries} failed for {ticker}: {e}")
-           if attempt < max_retries - 1:
-               time.sleep(retry_delay)
+   def get_tickers_from_trino():
+       conn = trino.dbapi.connect(
+           host=TRINO_HOST,
+           port=TRINO_PORT,
+           user="airflow",
+           catalog=TRINO_CATALOG,
+           schema=TRINO_SCHEMA
+       )
+       cursor = conn.cursor()
+       cursor.execute(f"SELECT ticker FROM {COMPANY_TABLE}")
+       tickers = [row[0] for row in cursor.fetchall()]
+       return tickers
+   ```
+
+4. **Fetching Stock Prices**:
+   - The `fetch_stock_prices` function uses the **yfinance** library to fetch stock prices for each ticker.
+   - The fetched data is inserted into the `stock_prices` table in Iceberg.
+
+   ```python
+   for ticker in tickers:
+       stock = yf.Ticker(ticker)
+       current_price = round(stock.history(period="1d")["Close"].iloc[-1], 2)
+       timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+       values_list.append(f"(TIMESTAMP '{timestamp}', '{ticker}', {current_price})")
+   ```
+
+5. **CSV Backup**:
+   - The fetched data is also appended to a CSV file (`stock_prices.csv`) for backup.
+
+   ```python
+   with open(CSV_FILE, 'a', newline='') as csvfile:
+       writer = csv.writer(csvfile)
+       if not file_exists:
+           writer.writerow(['record_date', 'ticker', 'price'])
+       writer.writerows(data_list)
    ```
 
 ---
 
 ## Pipeline Workflow
 
-1. The DAG starts and executes the `fetch_realtime_stock_prices` task.
-2. The task fetches the list of tickers from the `company_info` table in Iceberg.
-3. Tickers are processed in **batches**:
-   - For each ticker, the pipeline fetches the stock price and its associated timestamp from **yfinance**.
-   - The timestamp is converted to **Egypt time**.
-   - The data is validated before insertion.
-4. Valid data is inserted into the `stock_prices` table in Iceberg.
-5. The task logs the results and waits for the next scheduled run.
+1. The DAG starts and executes the `fetch_stock_prices` task.
+2. The task fetches the list of tickers from the `company_info` table.
+3. For each ticker, it fetches the stock price using **yfinance**.
+4. The fetched data is inserted into the `stock_prices` table in Iceberg.
+5. The data is also appended to the `stock_prices.csv` file.
+6. The task completes, and the DAG waits for the next scheduled run.
 
 ---
 
-## DAG Configuration
+## Dependencies
 
-### Environment Variables
-The pipeline uses environment variables for configuration:
+The following Python libraries are required:
+- **yfinance**: For fetching stock prices.
+- **trino**: For interacting with the Trino server.
+- **csv**: For writing data to a CSV file.
+- **os**: For checking if the CSV file exists.
+- **logging**: For logging pipeline activities.
 
-| Variable               | Default Value | Description                                   |
-|------------------------|---------------|-----------------------------------------------|
-| `TRINO_HOST`           | `trino`       | Trino server host.                            |
-| `TRINO_PORT`           | `8080`        | Trino server port.                            |
-| `TRINO_USER`           | `airflow`     | Trino user.                                   |
-| `TRINO_CATALOG`        | `iceberg`     | Trino catalog.                                |
-| `TRINO_SCHEMA`         | `stock_db`    | Trino schema.                                 |
-| `COMPANY_TABLE`        | `company_info`| Table containing company information.         |
-| `TRINO_TABLE`          | `stock_prices`| Table to store stock prices.                  |
-| `BATCH_SIZE`           | `12`          | Number of tickers to process in a batch.      |
-| `MAX_RETRIES`          | `3`           | Maximum number of retries for failed API calls.|
-| `RETRY_DELAY`          | `10`          | Delay (in seconds) between retries.           |
-| `API_RATE_LIMIT_DELAY` | `2`           | Delay (in seconds) between API calls.         |
+Install the dependencies using pip:
 
-### Default DAG Arguments
-The DAG is configured with the following default arguments:
-
-```python
-default_args = {
-    'owner': 'airflow',
-    'depends_on_past': False,
-    'start_date': datetime(2023, 10, 1),
-    'retries': 2,
-    'retry_delay': timedelta(minutes=1),
-    'email_on_failure': True,
-    'email_on_retry': False,
-}
+```bash
+pip install yfinance trino
 ```
 
 ---
 
-## Batch Processing
+## Logging and Error Handling
 
-- Tickers are processed in batches to reduce memory usage and improve reliability.
-- The batch size is configurable via the `BATCH_SIZE` environment variable.
-- Each batch is processed sequentially, with a delay (`API_RATE_LIMIT_DELAY`) between API calls to respect rate limits.
+- The pipeline uses Python's `logging` module to log activities and errors.
+- Errors are logged with detailed traceback information for debugging.
 
----
-
-## Time Zone Handling
-
-- The pipeline uses the **Africa/Cairo** time zone to ensure timestamps are accurate for the Egyptian Stock Market.
-- Timestamps fetched from **yfinance** are converted from UTC to Egypt time using the `pytz` library.
+Example log messages:
+- `Fetched 24 tickers from company_info`
+- `Fetched EGS381B1C015 - 45.67 at 2023-10-01 12:00:00`
+- `Error fetching data for EGS381B1C015: ...`
 
 ---
 
-## Data Validation
+## CSV Backup
 
-- Stock data is validated before insertion to ensure:
-  - The ticker is a non-empty string.
-  - The price is a positive number.
-  - The timestamp is valid.
+The fetched stock prices are appended to a CSV file (`stock_prices.csv`) with the following columns:
+- `record_date`: Timestamp of the record.
+- `ticker`: Stock ticker symbol.
+- `price`: Stock price at the given timestamp.
 
----
-
-## Error Handling and Retries
-
-- The pipeline retries failed API calls up to `MAX_RETRIES` times.
-- A delay (`RETRY_DELAY`) is added between retries to avoid overwhelming the API.
-- Errors are logged for debugging and monitoring.
+Example CSV content:
+```
+record_date,ticker,price
+2023-10-01 12:00:00,EGS381B1C015,45.67
+2023-10-01 12:15:00,EGS381B1C015,46.12
+```
 
 ---
 
 ## Conclusion
 
-The updated pipeline provides a robust and efficient solution for fetching and storing stock prices with **accurate timestamps**. The use of **batch processing**, **data validation**, and **error handling** ensures reliability and scalability. The pipeline is optimized for the **Egyptian Stock Market working hours** and can be easily configured using environment variables.
+This pipeline provides a robust solution for fetching and storing stock prices in an Iceberg table using Trino. It also ensures data backup by appending the fetched data to a CSV file. The use of Apache Airflow allows for easy scheduling and monitoring of the pipeline.
