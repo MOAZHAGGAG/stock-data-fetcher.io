@@ -1,6 +1,6 @@
 # Updated Stock Prices Data Pipeline Documentation
 
-This document provides a detailed explanation of the **updated Stock Prices Data Pipeline**. The pipeline now fetches stock prices with **accurate timestamps** from **yfinance**, processes the data in **batches**, and stores it in an **Iceberg table** using **Trino**. The pipeline is scheduled to run every **5 minutes** during the **Egyptian Stock Market working hours** (10 AM to 2:59 PM, Sunday to Thursday).
+This document provides a detailed explanation of the **updated Stock Prices Data Pipeline**. The pipeline now fetches stock prices with **accurate timestamps** from **yfinance**, processes the data in **batches**, and stores it in an **Iceberg table** using **Trino**. The pipeline is scheduled to run every **5 minutes** during the **Egyptian Stock Market working hours** , Sunday to Thursday).
 
 ---
 
@@ -53,7 +53,7 @@ The updated pipeline now:
    ```
 
 ### 3. **Scheduling**
-   - The DAG runs every **5 minutes** during the **Egyptian Stock Market working hours** (10 AM to 2:59 PM, Sunday to Thursday).
+   - The DAG runs every **5 minutes** during the **Egyptian Stock Market working hours** (10 AM to 1:59 PM, Sunday to Thursday).
    - The schedule is defined using a **cron expression**:
 
    ```python
@@ -62,7 +62,7 @@ The updated pipeline now:
 
    - Explanation:
      - `*/5`: Every 5 minutes.
-     - `8-12`: From 10 AM to 2:59 PM (UTC+2).
+     - `8-11`: From 10 AM to 2:59 PM (UTC+2).
      - `0-4`: Sunday to Thursday.
 
 ### 4. **Data Validation**
