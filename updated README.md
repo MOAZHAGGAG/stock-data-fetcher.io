@@ -62,7 +62,7 @@ The updated pipeline now:
 
    - Explanation:
      - `*/5`: Every 5 minutes.
-     - `8-11`: From 10 AM to 2:59 PM (UTC+2).
+     - `8-12`: From 10 AM to 2:59 PM (UTC+2).
      - `0-4`: Sunday to Thursday.
 
 ### 4. **Data Validation**
