@@ -46,7 +46,7 @@ dag = DAG(
     'daily_stock_prices_from_yfinance_v2',
     default_args=default_args,
     description='Fetch latest stock prices with accurate timestamps from yfinance',
-    schedule_interval='0 15 * * 0-4',  # Run once a day at 5:00 pm, Sunday-Thursday
+    schedule_interval='0 14 * * 0-4',  # Run once a day at 4:00 pm, Sunday-Thursday
     catchup=False,
 )
 
