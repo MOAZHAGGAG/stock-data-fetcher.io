@@ -26,7 +26,7 @@ db_params = {
     'port': '5432',
     'database': 'postgres',
     'user': 'postgres',
-    'password': 'uP(V~Oei]^@6tZ)d',
+    'password': 'password',
     'sslmode': 'verify-ca',
     'sslrootcert': POSTGRES_SSL_ROOT_CERT,
     'sslcert': POSTGRES_SSL_CERT,
